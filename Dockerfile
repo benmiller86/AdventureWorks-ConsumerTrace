@@ -4,6 +4,7 @@ WORKDIR /src
 
 COPY nuget.config ./
 COPY src/AdventureWorks.Web/AdventureWorks.Web.csproj src/AdventureWorks.Web/
+COPY src/EfCore.ConsumerTrace/EfCore.ConsumerTrace.csproj src/EfCore.ConsumerTrace/
 RUN dotnet restore src/AdventureWorks.Web/AdventureWorks.Web.csproj
 
 # Dev stage: source is bind-mounted by docker-compose and run under dotnet watch for hot reload

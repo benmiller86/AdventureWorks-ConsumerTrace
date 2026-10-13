@@ -1,5 +1,6 @@
 using AdventureWorks.Web.Components;
 using AdventureWorks.Web.Models;
+using EfCore.ConsumerTrace;
 using Microsoft.EntityFrameworkCore;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -9,7 +10,8 @@ builder.Services.AddRazorComponents()
     .AddInteractiveServerComponents();
 
 builder.Services.AddDbContext<AdventureWorksContext>(options =>
-    options.UseSqlServer(builder.Configuration.GetConnectionString("AdventureWorks")));
+    options.UseSqlServer(builder.Configuration.GetConnectionString("AdventureWorks"))
+        .AddInterceptors(new ConsumerTraceInterceptor()));
 
 var app = builder.Build();
 

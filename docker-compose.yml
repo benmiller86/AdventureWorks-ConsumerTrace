@@ -30,6 +30,8 @@ services:
       # Keep the container's bin/obj separate from the host's (host obj has Windows paths)
       - /src/src/AdventureWorks.Web/bin
       - /src/src/AdventureWorks.Web/obj
+      - /src/src/EfCore.ConsumerTrace/bin
+      - /src/src/EfCore.ConsumerTrace/obj
     environment:
       - ASPNETCORE_ENVIRONMENT=Development
       # Inside the compose network the database is reached by its service name
