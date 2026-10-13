@@ -6,6 +6,15 @@
     <header>
         <strong>Recent SQL</strong>
         <small class="text-muted">last @Count batches from sys.dm_exec_query_stats, newest first, refreshed every @IntervalSeconds s</small>
+        <div class="form-check form-switch mb-0 app-filter">
+            <input class="form-check-input" type="checkbox" role="switch" id="recent-queries-this-app"
+                   @bind="thisAppOnly" @bind:after="() => RefreshAsync(cts.Token)" />
+            <label class="form-check-label" for="recent-queries-this-app">This app only</label>
+        </div>
+        <button type="button" class="btn btn-outline-secondary btn-sm reset-button" @onclick="ResetAsync" disabled="@resetting"
+                title="Clear this database's plan cache (ALTER DATABASE SCOPED CONFIGURATION CLEAR PROCEDURE_CACHE)">
+            @(resetting ? "Resetting..." : "Reset")
+        </button>
     </header>
 
     @if (error is not null)
@@ -55,6 +64,8 @@
     private readonly CancellationTokenSource cts = new();
     private IReadOnlyList<RecentQuery>? queries;
     private string? error;
+    private bool resetting;
+    private bool thisAppOnly = true;
 
     protected override void OnAfterRender(bool firstRender)
     {
@@ -72,16 +83,7 @@
             using PeriodicTimer timer = new PeriodicTimer(TimeSpan.FromSeconds(IntervalSeconds));
             do
             {
-                try
-                {
-                    queries = await Feed.GetRecentAsync(Count, cancellationToken);
-                    error = null;
-                }
-                catch (Exception ex) when (ex is not OperationCanceledException)
-                {
-                    error = $"Could not read recent queries: {ex.Message}";
-                }
-
+                await RefreshAsync(cancellationToken);
                 await InvokeAsync(StateHasChanged);
             }
             while (await timer.WaitForNextTickAsync(cancellationToken));
@@ -89,6 +91,37 @@
         catch (OperationCanceledException)
         {
             // Component disposed
+        }
+    }
+
+    private async Task RefreshAsync(CancellationToken cancellationToken)
+    {
+        try
+        {
+            queries = await Feed.GetRecentAsync(Count, thisAppOnly, cancellationToken);
+            error = null;
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            error = $"Could not read recent queries: {ex.Message}";
+        }
+    }
+
+    private async Task ResetAsync()
+    {
+        resetting = true;
+        try
+        {
+            await Feed.ClearPlanCacheAsync(cts.Token);
+            await RefreshAsync(cts.Token);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            error = $"Could not clear the plan cache: {ex.Message}";
+        }
+        finally
+        {
+            resetting = false;
         }
     }
 

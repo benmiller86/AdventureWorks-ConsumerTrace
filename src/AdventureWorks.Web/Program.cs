@@ -13,9 +13,13 @@ builder.Services.AddRazorComponents()
 // Factory so interactive components can create a short-lived context per operation; a circuit-scoped
 // context would throw if a user triggers a second query (e.g. paging) while one is still running.
 // AddDbContextFactory also registers AdventureWorksContext itself as a scoped service.
+// Also registered so RecentQueryFeed can filter on the app name it writes into each query's comment
+ConsumerTraceInterceptor consumerTraceInterceptor = new ConsumerTraceInterceptor<Program>();
+builder.Services.AddSingleton(consumerTraceInterceptor);
+
 builder.Services.AddDbContextFactory<AdventureWorksContext>(options =>
     options.UseSqlServer(builder.Configuration.GetConnectionString("AdventureWorks"))
-        .AddInterceptors(new ConsumerTraceInterceptor()));
+        .AddInterceptors(consumerTraceInterceptor));
 
 builder.Services.AddSingleton<RecentQueryFeed>();
 

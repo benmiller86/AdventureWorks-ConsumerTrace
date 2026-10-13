@@ -1,4 +1,6 @@
+using System.Data;
 using System.Text.RegularExpressions;
+using EfCore.ConsumerTrace;
 using Microsoft.Data.SqlClient;
 
 namespace AdventureWorks.Web.Services;
@@ -17,7 +19,7 @@ public sealed record RecentQuery(
 /// Reads the most recently executed batches against the app's database from SQL Server's plan cache.
 /// Uses a plain SqlConnection rather than the DbContext so polling isn't intercepted or logged by EF.
 /// </summary>
-public sealed partial class RecentQueryFeed(IConfiguration configuration)
+public sealed partial class RecentQueryFeed(IConfiguration configuration, ConsumerTraceInterceptor consumerTraceInterceptor)
 {
     // Matches ", link: https://github.com/..." in the ConsumerTraceInterceptor comment. The interceptor escapes
     // path segments, so the URL itself contains no whitespace, commas or asterisks.
@@ -50,19 +52,28 @@ public sealed partial class RecentQueryFeed(IConfiguration configuration)
         FROM batches AS b
         CROSS APPLY sys.dm_exec_sql_text(b.sql_handle) AS t
         WHERE t.text NOT LIKE N'%/* RecentQueryFeed */%'
+          AND (@appCommentPattern IS NULL OR t.text LIKE @appCommentPattern)
         ORDER BY b.last_execution_time DESC;
         """;
+
+    // Matches the start of the ConsumerTraceInterceptor comment for this app: "/* app: {name}, ..."
+    // LIKE wildcards in the name are bracket-escaped so they match literally.
+    private readonly string appCommentPattern =
+        $"%/* app: {EscapeLike(consumerTraceInterceptor.AppName)},%";
 
     private readonly string connectionString = configuration.GetConnectionString("AdventureWorks")
         ?? throw new InvalidOperationException("Connection string 'AdventureWorks' is not configured.");
 
-    public async Task<IReadOnlyList<RecentQuery>> GetRecentAsync(int take, CancellationToken cancellationToken)
+    /// <param name="thisAppOnly">Only return batches tagged by this app's ConsumerTraceInterceptor.</param>
+    public async Task<IReadOnlyList<RecentQuery>> GetRecentAsync(int take, bool thisAppOnly, CancellationToken cancellationToken)
     {
         await using SqlConnection connection = new SqlConnection(connectionString);
         await connection.OpenAsync(cancellationToken);
 
         await using SqlCommand command = new SqlCommand(Sql, connection);
         command.Parameters.AddWithValue("@take", take);
+        command.Parameters.Add("@appCommentPattern", SqlDbType.NVarChar, 4000).Value =
+            thisAppOnly ? appCommentPattern : DBNull.Value;
 
         List<RecentQuery> results = new List<RecentQuery>(take);
         await using SqlDataReader reader = await command.ExecuteReaderAsync(cancellationToken);
@@ -82,4 +93,21 @@ public sealed partial class RecentQueryFeed(IConfiguration configuration)
 
         return results;
     }
+
+    /// <summary>
+    /// Clears the plan cache for the app's database only (not the whole server), which also removes its rows
+    /// from sys.dm_exec_query_stats. Intended for demos; it forces every query to recompile.
+    /// </summary>
+    public async Task ClearPlanCacheAsync(CancellationToken cancellationToken)
+    {
+        await using SqlConnection connection = new SqlConnection(connectionString);
+        await connection.OpenAsync(cancellationToken);
+
+        await using SqlCommand command = new SqlCommand(
+            "/* RecentQueryFeed */ ALTER DATABASE SCOPED CONFIGURATION CLEAR PROCEDURE_CACHE;", connection);
+        await command.ExecuteNonQueryAsync(cancellationToken);
+    }
+
+    private static string EscapeLike(string value) =>
+        value.Replace("[", "[[]").Replace("%", "[%]").Replace("_", "[_]");
 }

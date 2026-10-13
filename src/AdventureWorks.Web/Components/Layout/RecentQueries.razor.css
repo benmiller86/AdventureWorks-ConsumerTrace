@@ -17,6 +17,16 @@
         margin-bottom: 0.5rem;
     }
 
+    .recent-queries .app-filter {
+        margin-left: auto;
+        font-size: 0.75rem;
+    }
+
+    .recent-queries .reset-button {
+        padding: 0 0.5rem;
+        font-size: 0.75rem;
+    }
+
     .recent-queries li + li {
         margin-top: 0.5rem;
     }
