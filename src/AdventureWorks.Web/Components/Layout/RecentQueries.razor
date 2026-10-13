@@ -1,0 +1,99 @@
+@using AdventureWorks.Web.Services
+@implements IDisposable
+@inject RecentQueryFeed Feed
+
+<section class="recent-queries">
+    <header>
+        <strong>Recent SQL</strong>
+        <small class="text-muted">last @Count batches from sys.dm_exec_query_stats, newest first, refreshed every @IntervalSeconds s</small>
+    </header>
+
+    @if (error is not null)
+    {
+        <div class="alert alert-danger py-1 px-2 mb-0">@error</div>
+    }
+    else if (queries is null)
+    {
+        <p class="text-muted mb-0"><em>Connecting...</em></p>
+    }
+    else if (queries.Count == 0)
+    {
+        <p class="text-muted mb-0"><em>No queries in the plan cache yet.</em></p>
+    }
+    else
+    {
+        <ol class="list-unstyled mb-0">
+            @foreach (RecentQuery q in queries)
+            {
+                <li>
+                    <div class="meta">
+                        <span>@FormatAgo(q.SecondsAgoMs)</span>
+                        <span>@q.LastExecutionTime.ToString("HH:mm:ss.fff")</span>
+                        <span>@q.ExecutionCount× executed</span>
+                        <span>avg @q.AvgElapsedMs.ToString("0.##") ms</span>
+                    </div>
+                    <pre>@q.SqlText.Trim()</pre>
+                </li>
+            }
+        </ol>
+    }
+</section>
+
+@code {
+    [Parameter] public int Count { get; set; } = 10;
+    [Parameter] public int IntervalSeconds { get; set; } = 2;
+
+    private readonly CancellationTokenSource cts = new();
+    private IReadOnlyList<RecentQuery>? queries;
+    private string? error;
+
+    protected override void OnAfterRender(bool firstRender)
+    {
+        // Only runs once the component is interactive (never during prerendering)
+        if (firstRender)
+        {
+            _ = PollAsync(cts.Token);
+        }
+    }
+
+    private async Task PollAsync(CancellationToken cancellationToken)
+    {
+        try
+        {
+            using PeriodicTimer timer = new PeriodicTimer(TimeSpan.FromSeconds(IntervalSeconds));
+            do
+            {
+                try
+                {
+                    queries = await Feed.GetRecentAsync(Count, cancellationToken);
+                    error = null;
+                }
+                catch (Exception ex) when (ex is not OperationCanceledException)
+                {
+                    error = $"Could not read recent queries: {ex.Message}";
+                }
+
+                await InvokeAsync(StateHasChanged);
+            }
+            while (await timer.WaitForNextTickAsync(cancellationToken));
+        }
+        catch (OperationCanceledException)
+        {
+            // Component disposed
+        }
+    }
+
+    private static string FormatAgo(long ms) => ms switch
+    {
+        < 1000 => "just now",
+        < 60_000 => $"{ms / 1000}s ago",
+        < 3_600_000 => $"{ms / 60_000}m ago",
+        _ => $"{ms / 3_600_000}h ago"
+    };
+
+    public void Dispose()
+    {
+        cts.Cancel();
+        cts.Dispose();
+    }
+}

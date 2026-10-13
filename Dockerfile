@@ -14,9 +14,6 @@ ENV ASPNETCORE_ENVIRONMENT=Development \
     ASPNETCORE_HTTP_PORTS=8080 \
     # Windows bind mounts don't raise inotify events inside Linux containers, so poll for changes
     DOTNET_USE_POLLING_FILE_WATCHER=true \
-    # The browser-refresh websocket listens on a random container port the browser can't reach;
-    # Blazor Server hot reload is applied server-side over the circuit and doesn't need it
-    DOTNET_WATCH_SUPPRESS_BROWSER_REFRESH=1 \
     DOTNET_WATCH_SUPPRESS_EMOJIS=1
 EXPOSE 8080
 ENTRYPOINT ["dotnet", "watch", "run", "--non-interactive", "--no-launch-profile"]

@@ -1,19 +1,25 @@
 using AdventureWorks.Web.Components;
 using AdventureWorks.Web.Models;
+using AdventureWorks.Web.Services;
 using EfCore.ConsumerTrace;
 using Microsoft.EntityFrameworkCore;
 
-var builder = WebApplication.CreateBuilder(args);
+WebApplicationBuilder builder = WebApplication.CreateBuilder(args);
 
 // Add services to the container.
 builder.Services.AddRazorComponents()
     .AddInteractiveServerComponents();
 
-builder.Services.AddDbContext<AdventureWorksContext>(options =>
+// Factory so interactive components can create a short-lived context per operation; a circuit-scoped
+// context would throw if a user triggers a second query (e.g. paging) while one is still running.
+// AddDbContextFactory also registers AdventureWorksContext itself as a scoped service.
+builder.Services.AddDbContextFactory<AdventureWorksContext>(options =>
     options.UseSqlServer(builder.Configuration.GetConnectionString("AdventureWorks"))
         .AddInterceptors(new ConsumerTraceInterceptor()));
 
-var app = builder.Build();
+builder.Services.AddSingleton<RecentQueryFeed>();
+
+WebApplication app = builder.Build();
 
 // Configure the HTTP request pipeline.
 if (!app.Environment.IsDevelopment())

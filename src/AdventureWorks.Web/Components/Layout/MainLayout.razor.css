@@ -76,6 +76,20 @@ main {
     }
 }
 
+/* Large screens: page content on the left, RecentQueries panel as a wide column on the right */
+@media (min-width: 1400px) {
+    main {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) clamp(33rem, 42vw, 51rem);
+        grid-template-rows: auto 1fr;
+        align-items: start;
+    }
+
+    .top-row {
+        grid-column: 1 / -1;
+    }
+}
+
 #blazor-error-ui {
     color-scheme: light only;
     background: lightyellow;
