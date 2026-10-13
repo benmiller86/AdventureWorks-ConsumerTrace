@@ -1,0 +1,177 @@
+@page "/people"
+@rendermode InteractiveServer
+@using AdventureWorks.Web.Models
+@using Microsoft.EntityFrameworkCore
+@implements IDisposable
+@inject IDbContextFactory<AdventureWorksContext> DbFactory
+
+<PageTitle>People</PageTitle>
+
+<h1>People</h1>
+
+<p class="query-method">
+    <strong>Query method: raw SQL for an entity type (<code>FromSql</code>).</strong>
+    <code>db.People.FromSql($"SELECT * FROM Person.Person WHERE LastName LIKE {pattern}")</code> runs hand-written SQL and
+    materialises <code>Person</code> entities; the interpolated value is sent as a parameter, not concatenated into the SQL.
+    Because the raw SQL is a plain <code>SELECT</code>, EF can compose on it: the count, ordering and paging are added with
+    LINQ and EF wraps the raw SQL in a subquery.
+</p>
+
+<div class="d-flex flex-wrap align-items-center gap-3 mb-2">
+    <input type="search" class="form-control form-control-sm people-search" placeholder="Last name starts with..." aria-label="Search people by last name"
+           @bind="searchText" @bind:event="oninput" @bind:after="OnSearchChangedAsync" />
+
+    @if (totalCount > 0)
+    {
+        <span class="text-muted small">
+            Showing @((currentPage - 1) * PageSize + 1)–@Math.Min(currentPage * PageSize, totalCount) of @totalCount
+        </span>
+    }
+</div>
+
+@if (error is not null)
+{
+    <div class="alert alert-danger">@error</div>
+}
+else if (people is null)
+{
+    <p><em>Loading...</em></p>
+}
+else
+{
+    <div class="table-responsive">
+        <table class="table table-striped table-hover table-sm">
+            <thead>
+                <tr>
+                    <th>ID</th>
+                    <th>Name</th>
+                    <th title="SC = store contact, IN = individual customer, SP = sales person, EM = employee, VC = vendor contact, GC = general contact">Type</th>
+                    <th class="text-end">Email promotion</th>
+                    <th>Modified</th>
+                </tr>
+            </thead>
+            <tbody>
+                @if (people.Count == 0)
+                {
+                    <tr>
+                        <td colspan="5" class="text-muted"><em>No people with a last name starting "@searchText".</em></td>
+                    </tr>
+                }
+                @foreach (Person p in people)
+                {
+                    <tr>
+                        <td>@p.BusinessEntityId</td>
+                        <td>@FullName(p)</td>
+                        <td>@p.PersonType</td>
+                        <td class="text-end">@p.EmailPromotion</td>
+                        <td>@p.ModifiedDate.ToShortDateString()</td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    </div>
+
+    <Pager CurrentPage="currentPage" TotalPages="totalPages" OnPageSelected="GoToPageAsync" AriaLabel="People pages" />
+}
+
+@code {
+    private const int PageSize = 25;
+
+    private List<Person>? people;
+    private string? error;
+    private string searchText = "";
+    private int currentPage = 1;
+    private int totalCount;
+    private int totalPages;
+    private CancellationTokenSource? searchDebounce;
+
+    // Incremented per load so a slow response can't overwrite the results of a newer request
+    private int loadVersion;
+
+    protected override Task OnInitializedAsync() => LoadAsync();
+
+    private async Task OnSearchChangedAsync()
+    {
+        // Wait for a pause in typing so each keystroke doesn't trigger a query
+        searchDebounce?.Cancel();
+        searchDebounce?.Dispose();
+        searchDebounce = new CancellationTokenSource();
+
+        try
+        {
+            await Task.Delay(300, searchDebounce.Token);
+        }
+        catch (TaskCanceledException)
+        {
+            return;
+        }
+
+        currentPage = 1;
+        await LoadAsync();
+    }
+
+    private Task GoToPageAsync(int page)
+    {
+        currentPage = page;
+        return LoadAsync();
+    }
+
+    private async Task LoadAsync()
+    {
+        int version = ++loadVersion;
+
+        try
+        {
+            await using AdventureWorksContext db = await DbFactory.CreateDbContextAsync();
+
+            string term = searchText.Trim();
+            string pattern = EscapeLike(term) + "%";
+
+            // FromSql requires the SQL to return every column mapped to Person, hence SELECT *
+            IQueryable<Person> query = term.Length == 0
+                ? db.People.FromSql($"SELECT * FROM Person.Person")
+                : db.People.FromSql($"SELECT * FROM Person.Person WHERE LastName LIKE {pattern}");
+
+            query = query.AsNoTracking();
+
+            int count = await query.CountAsync();
+            int pages = Math.Max(1, (int)Math.Ceiling(count / (double)PageSize));
+            int page = Math.Clamp(currentPage, 1, pages);
+
+            List<Person> items = await query
+                .OrderBy(p => p.LastName)
+                .ThenBy(p => p.FirstName)
+                .ThenBy(p => p.BusinessEntityId)
+                .Skip((page - 1) * PageSize)
+                .Take(PageSize)
+                .ToListAsync();
+
+            if (version != loadVersion)
+            {
+                return;
+            }
+
+            (people, totalCount, totalPages, currentPage, error) = (items, count, pages, page, null);
+        }
+        catch (Exception ex)
+        {
+            if (version == loadVersion)
+            {
+                error = $"Could not load people: {ex.Message}";
+            }
+        }
+    }
+
+    private static string FullName(Person p) =>
+        string.Join(' ', new[] { p.Title, p.FirstName, p.MiddleName, p.LastName, p.Suffix }.Where(s => !string.IsNullOrEmpty(s)));
+
+    // Bracket-escape LIKE wildcards so the search text matches literally
+    private static string EscapeLike(string value) =>
+        value.Replace("[", "[[]").Replace("%", "[%]").Replace("_", "[_]");
+
+    public void Dispose()
+    {
+        searchDebounce?.Cancel();
+        searchDebounce?.Dispose();
+    }
+}

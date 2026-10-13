@@ -1,0 +1,182 @@
+@page "/special-offers"
+@rendermode InteractiveServer
+@using AdventureWorks.Web.Models
+@using Microsoft.EntityFrameworkCore
+@inject IDbContextFactory<AdventureWorksContext> DbFactory
+
+<PageTitle>Special Offers</PageTitle>
+
+<h1>Special Offers</h1>
+
+<p class="query-method">
+    <strong>Query method: set-based bulk updates (<code>ExecuteUpdateAsync</code>).</strong>
+    Each button below changes every matching offer with a single <code>UPDATE ... WHERE</code> statement run in the database,
+    for example <code>db.SpecialOffers.Where(...).ExecuteUpdateAsync(s =&gt; s.SetProperty(o =&gt; o.DiscountPct, o =&gt; o.DiscountPct + delta))</code>.
+    No entities are loaded and the change tracker isn't involved; the call returns the number of rows affected.
+    (The table itself is read with LINQ.)
+</p>
+
+<div class="d-flex flex-wrap align-items-end gap-3 mb-3">
+    <label class="mb-0">
+        <span class="d-block small">Category</span>
+        <select class="form-select form-select-sm w-auto" @bind="category" @bind:after="LoadAsync">
+            <option value="">All categories</option>
+            @foreach (string c in categories)
+            {
+                <option value="@c">@c</option>
+            }
+        </select>
+    </label>
+
+    <label class="mb-0">
+        <span class="d-block small">Discount change (percentage points)</span>
+        <input type="number" class="form-control form-control-sm discount-delta" step="1" min="-100" max="100" @bind="discountDelta" />
+    </label>
+
+    <button type="button" class="btn btn-primary btn-sm" @onclick="AdjustDiscountAsync" disabled="@busy">Apply discount change</button>
+    <button type="button" class="btn btn-outline-primary btn-sm" @onclick="() => ShiftEndDatesAsync(30)" disabled="@busy">Extend end dates 30 days</button>
+    <button type="button" class="btn btn-outline-primary btn-sm" @onclick="() => ShiftEndDatesAsync(-30)" disabled="@busy">Shorten end dates 30 days</button>
+</div>
+
+@if (status is not null)
+{
+    <div class="alert alert-success py-1 px-2">@status</div>
+}
+
+@if (error is not null)
+{
+    <div class="alert alert-danger">@error</div>
+}
+else if (offers is null)
+{
+    <p><em>Loading...</em></p>
+}
+else
+{
+    <div class="table-responsive">
+        <table class="table table-striped table-hover table-sm">
+            <thead>
+                <tr>
+                    <th class="text-end">ID</th>
+                    <th>Description</th>
+                    <th>Category</th>
+                    <th>Type</th>
+                    <th class="text-end">Discount</th>
+                    <th class="text-end">Qty range</th>
+                    <th>Start</th>
+                    <th>End</th>
+                    <th>Modified</th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (SpecialOffer o in offers)
+                {
+                    <tr>
+                        <td class="text-end">@o.SpecialOfferId</td>
+                        <td>@o.Description</td>
+                        <td>@o.Category</td>
+                        <td>@o.Type</td>
+                        <td class="text-end">@o.DiscountPct.ToString("P0")</td>
+                        <td class="text-end">@o.MinQty–@(o.MaxQty?.ToString() ?? "∞")</td>
+                        <td>@o.StartDate.ToShortDateString()</td>
+                        <td>@o.EndDate.ToShortDateString()</td>
+                        <td>@o.ModifiedDate.ToString("g")</td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    </div>
+}
+
+@code {
+    private List<SpecialOffer>? offers;
+    private List<string> categories = [];
+    private string category = "";
+    private int discountDelta = 5;
+    private bool busy;
+    private string? status;
+    private string? error;
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            await using AdventureWorksContext db = await DbFactory.CreateDbContextAsync();
+            categories = await db.SpecialOffers.Select(o => o.Category).Distinct().OrderBy(c => c).ToListAsync();
+        }
+        catch (Exception ex)
+        {
+            error = $"Could not load categories: {ex.Message}";
+            return;
+        }
+
+        await LoadAsync();
+    }
+
+    private async Task LoadAsync()
+    {
+        try
+        {
+            await using AdventureWorksContext db = await DbFactory.CreateDbContextAsync();
+            offers = await InCategory(db.SpecialOffers.AsNoTracking())
+                .OrderBy(o => o.SpecialOfferId)
+                .ToListAsync();
+            error = null;
+        }
+        catch (Exception ex)
+        {
+            error = $"Could not load special offers: {ex.Message}";
+        }
+    }
+
+    private Task AdjustDiscountAsync()
+    {
+        decimal delta = discountDelta / 100m;
+
+        return RunBulkUpdateAsync(
+            $"change the discount by {discountDelta:+0;-0;0} percentage points",
+            db => InCategory(db.SpecialOffers)
+                // The table's CHECK constraint keeps discounts within 0-100%, so skip offers that would leave that range
+                .Where(o => o.DiscountPct + delta >= 0 && o.DiscountPct + delta <= 1)
+                .ExecuteUpdateAsync(s => s
+                    .SetProperty(o => o.DiscountPct, o => o.DiscountPct + delta)
+                    .SetProperty(o => o.ModifiedDate, DateTime.Now)));
+    }
+
+    private Task ShiftEndDatesAsync(int days) =>
+        RunBulkUpdateAsync(
+            $"{(days >= 0 ? "extend" : "shorten")} end dates by {Math.Abs(days)} days",
+            db => InCategory(db.SpecialOffers)
+                // A CHECK constraint requires EndDate >= StartDate, so skip offers that would end before they start
+                .Where(o => o.EndDate.AddDays(days) >= o.StartDate)
+                .ExecuteUpdateAsync(s => s
+                    .SetProperty(o => o.EndDate, o => o.EndDate.AddDays(days))
+                    .SetProperty(o => o.ModifiedDate, DateTime.Now)));
+
+    private async Task RunBulkUpdateAsync(string description, Func<AdventureWorksContext, Task<int>> update)
+    {
+        busy = true;
+        try
+        {
+            await using AdventureWorksContext db = await DbFactory.CreateDbContextAsync();
+            int affected = await update(db);
+            status = $"ExecuteUpdateAsync: {description} – {affected} row(s) updated in "
+                + (category.Length == 0 ? "all categories." : $"category \"{category}\".");
+        }
+        catch (Exception ex)
+        {
+            status = null;
+            error = $"Bulk update failed: {ex.Message}";
+            return;
+        }
+        finally
+        {
+            busy = false;
+        }
+
+        await LoadAsync();
+    }
+
+    private IQueryable<SpecialOffer> InCategory(IQueryable<SpecialOffer> query) =>
+        category.Length == 0 ? query : query.Where(o => o.Category == category);
+}

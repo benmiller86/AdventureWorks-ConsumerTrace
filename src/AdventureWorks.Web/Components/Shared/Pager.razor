@@ -1,0 +1,40 @@
+@* Bootstrap pagination: First / Prev / up to 5 page numbers around the current page / Next / Last *@
+
+@if (TotalPages > 1)
+{
+    <nav aria-label="@AriaLabel">
+        <ul class="pagination pagination-sm flex-wrap">
+            <li class="page-item @(CurrentPage == 1 ? "disabled" : null)">
+                <button type="button" class="page-link" @onclick="() => SelectAsync(1)">« First</button>
+            </li>
+            <li class="page-item @(CurrentPage == 1 ? "disabled" : null)">
+                <button type="button" class="page-link" @onclick="() => SelectAsync(CurrentPage - 1)">‹ Prev</button>
+            </li>
+            @for (int page = Math.Max(1, CurrentPage - 2); page <= Math.Min(TotalPages, CurrentPage + 2); page++)
+            {
+                int target = page;
+                <li class="page-item @(target == CurrentPage ? "active" : null)" aria-current="@(target == CurrentPage ? "page" : null)">
+                    <button type="button" class="page-link" @onclick="() => SelectAsync(target)">@target</button>
+                </li>
+            }
+            <li class="page-item @(CurrentPage == TotalPages ? "disabled" : null)">
+                <button type="button" class="page-link" @onclick="() => SelectAsync(CurrentPage + 1)">Next ›</button>
+            </li>
+            <li class="page-item @(CurrentPage == TotalPages ? "disabled" : null)">
+                <button type="button" class="page-link" @onclick="() => SelectAsync(TotalPages)">Last »</button>
+            </li>
+        </ul>
+    </nav>
+}
+
+@code {
+    [Parameter, EditorRequired] public int CurrentPage { get; set; }
+    [Parameter, EditorRequired] public int TotalPages { get; set; }
+    [Parameter] public EventCallback<int> OnPageSelected { get; set; }
+    [Parameter] public string AriaLabel { get; set; } = "Pages";
+
+    private Task SelectAsync(int page) =>
+        page < 1 || page > TotalPages || page == CurrentPage
+            ? Task.CompletedTask
+            : OnPageSelected.InvokeAsync(page);
+}

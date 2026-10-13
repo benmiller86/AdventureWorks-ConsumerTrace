@@ -1,0 +1,139 @@
+@page "/sales-by-territory"
+@rendermode InteractiveServer
+@using AdventureWorks.Web.Models
+@using Microsoft.EntityFrameworkCore
+@inject IDbContextFactory<AdventureWorksContext> DbFactory
+
+<PageTitle>Sales by Territory</PageTitle>
+
+<h1>Sales by Territory</h1>
+
+<p class="query-method">
+    <strong>Query method: raw SQL for non-entity types and scalars (<code>Database.SqlQuery</code>).</strong>
+    The per-territory rows come from a hand-written <code>GROUP BY</code> mapped straight onto a plain class
+    (<code>TerritorySales</code>) that isn't part of the EF model. The order count and revenue totals use
+    <code>SqlQuery&lt;int&gt;</code> and <code>SqlQuery&lt;decimal&gt;</code>; scalar queries must name their column
+    <code>Value</code>. The ordering and <code>SingleAsync</code> are composed on top with LINQ.
+</p>
+
+<div class="d-flex flex-wrap align-items-center gap-3 mb-3">
+    <label class="d-flex align-items-center gap-2 mb-0">
+        Order year
+        <select class="form-select form-select-sm w-auto" @bind="year" @bind:after="LoadAsync">
+            <option value="0">All years</option>
+            @foreach (int y in Years)
+            {
+                <option value="@y">@y</option>
+            }
+        </select>
+    </label>
+
+    @if (orderCount is not null && revenue is not null)
+    {
+        <span><strong>@orderCount.Value.ToString("N0")</strong> orders</span>
+        <span><strong>@revenue.Value.ToString("C0", usd)</strong> total due</span>
+    }
+</div>
+
+@if (error is not null)
+{
+    <div class="alert alert-danger">@error</div>
+}
+else if (territories is null)
+{
+    <p><em>Loading...</em></p>
+}
+else
+{
+    <div class="table-responsive">
+        <table class="table table-striped table-hover table-sm">
+            <thead>
+                <tr>
+                    <th>Territory</th>
+                    <th>Country/Region</th>
+                    <th>Group</th>
+                    <th class="text-end">Orders</th>
+                    <th class="text-end">Total due</th>
+                    <th class="text-end">Average order</th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (TerritorySales t in territories)
+                {
+                    <tr>
+                        <td>@t.Territory</td>
+                        <td>@t.CountryRegion</td>
+                        <td>@t.Group</td>
+                        <td class="text-end">@t.Orders.ToString("N0")</td>
+                        <td class="text-end">@t.TotalDue.ToString("C0", usd)</td>
+                        <td class="text-end">@((t.TotalDue / t.Orders).ToString("C0", usd))</td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    </div>
+}
+
+@code {
+    /// <summary>Unmapped result type for SqlQuery; properties are matched to the query's column names.</summary>
+    public sealed class TerritorySales
+    {
+        public string Territory { get; set; } = "";
+        public string CountryRegion { get; set; } = "";
+        public string Group { get; set; } = "";
+        public int Orders { get; set; }
+
+        [Precision(19, 4)]
+        public decimal TotalDue { get; set; }
+    }
+
+    private static readonly int[] Years = [2011, 2012, 2013, 2014];
+    private static readonly System.Globalization.CultureInfo usd = System.Globalization.CultureInfo.GetCultureInfo("en-US");
+
+    private List<TerritorySales>? territories;
+    private int? orderCount;
+    private decimal? revenue;
+    private string? error;
+
+    // 0 = all years; kept non-nullable so the SQL parameter always has a type
+    private int year;
+
+    protected override Task OnInitializedAsync() => LoadAsync();
+
+    private async Task LoadAsync()
+    {
+        try
+        {
+            await using AdventureWorksContext db = await DbFactory.CreateDbContextAsync();
+
+            territories = await db.Database
+                .SqlQuery<TerritorySales>($"""
+                    SELECT t.Name AS Territory,
+                           t.CountryRegionCode AS CountryRegion,
+                           t.[Group] AS [Group],
+                           COUNT(*) AS Orders,
+                           SUM(h.TotalDue) AS TotalDue
+                    FROM Sales.SalesOrderHeader AS h
+                    JOIN Sales.SalesTerritory AS t ON t.TerritoryID = h.TerritoryID
+                    WHERE {year} = 0 OR YEAR(h.OrderDate) = {year}
+                    GROUP BY t.Name, t.CountryRegionCode, t.[Group]
+                    """)
+                .OrderByDescending(t => t.TotalDue)
+                .ToListAsync();
+
+            orderCount = await db.Database
+                .SqlQuery<int>($"SELECT COUNT(*) AS [Value] FROM Sales.SalesOrderHeader WHERE {year} = 0 OR YEAR(OrderDate) = {year}")
+                .SingleAsync();
+
+            revenue = await db.Database
+                .SqlQuery<decimal>($"SELECT ISNULL(SUM(TotalDue), 0) AS [Value] FROM Sales.SalesOrderHeader WHERE {year} = 0 OR YEAR(OrderDate) = {year}")
+                .SingleAsync();
+
+            error = null;
+        }
+        catch (Exception ex)
+        {
+            error = $"Could not load sales: {ex.Message}";
+        }
+    }
+}

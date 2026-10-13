@@ -10,7 +10,11 @@
 
 <h1>Products</h1>
 
-<p>Records from <code>Production.Product</code>.</p>
+<p class="query-method">
+    <strong>Query method: LINQ.</strong> The <code>Production.Product</code> query is built from <code>IQueryable</code> operators
+    (<code>Where</code>, <code>OrderBy</code>, <code>Skip</code>/<code>Take</code>, <code>CountAsync</code>), which EF translates
+    to SQL with parameters, sorting and paging all done in the database.
+</p>
 
 <div class="d-flex flex-wrap align-items-center gap-3 mb-2">
     @* type="search" gets the browser's built-in clear button, which raises an input event like typing does *@
@@ -84,32 +88,7 @@ else
         </table>
     </div>
 
-    @if (totalPages > 1)
-    {
-        <nav aria-label="Product pages">
-            <ul class="pagination pagination-sm flex-wrap">
-                <li class="page-item @(currentPage == 1 ? "disabled" : null)">
-                    <button type="button" class="page-link" @onclick="() => GoToPageAsync(1)">« First</button>
-                </li>
-                <li class="page-item @(currentPage == 1 ? "disabled" : null)">
-                    <button type="button" class="page-link" @onclick="() => GoToPageAsync(currentPage - 1)">‹ Prev</button>
-                </li>
-                @for (int page = Math.Max(1, currentPage - 2); page <= Math.Min(totalPages, currentPage + 2); page++)
-                {
-                    int target = page;
-                    <li class="page-item @(target == currentPage ? "active" : null)" aria-current="@(target == currentPage ? "page" : null)">
-                        <button type="button" class="page-link" @onclick="() => GoToPageAsync(target)">@target</button>
-                    </li>
-                }
-                <li class="page-item @(currentPage == totalPages ? "disabled" : null)">
-                    <button type="button" class="page-link" @onclick="() => GoToPageAsync(currentPage + 1)">Next ›</button>
-                </li>
-                <li class="page-item @(currentPage == totalPages ? "disabled" : null)">
-                    <button type="button" class="page-link" @onclick="() => GoToPageAsync(totalPages)">Last »</button>
-                </li>
-            </ul>
-        </nav>
-    }
+    <Pager CurrentPage="currentPage" TotalPages="totalPages" OnPageSelected="GoToPageAsync" AriaLabel="Product pages" />
 }
 
 @code {

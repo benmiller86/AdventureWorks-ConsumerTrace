@@ -1,0 +1,160 @@
+@page "/bill-of-materials"
+@rendermode InteractiveServer
+@using System.ComponentModel.DataAnnotations.Schema
+@using AdventureWorks.Web.Models
+@using Microsoft.EntityFrameworkCore
+@inject IDbContextFactory<AdventureWorksContext> DbFactory
+
+<PageTitle>Bill of Materials</PageTitle>
+
+<h1>Bill of Materials</h1>
+
+<p class="query-method">
+    <strong>Query method: stored procedure.</strong>
+    Calls <code>dbo.uspGetBillOfMaterials</code> with
+    <code>db.Database.SqlQuery&lt;BomRow&gt;($"EXEC dbo.uspGetBillOfMaterials @@StartProductID = {productId}, @@CheckDate = {checkDate}")</code>,
+    with the arguments sent as parameters. An <code>EXEC</code> can't be composed on, so the results are materialised directly
+    with <code>ToListAsync()</code> and come back in the procedure's own order. (The product list is a normal LINQ query.)
+    <br />
+    <strong>Tracing caveat:</strong> the <code>EXEC</code> batch still carries the trace comment, but it won't appear in Recent SQL:
+    <code>sys.dm_exec_query_stats</code> only records statements that have a query plan, and an <code>EXEC</code> has none.
+    The procedure's own statements are recorded against the procedure's definition instead, without the comment, so they only
+    show up with "This app only" switched off.
+
+</p>
+
+<div class="d-flex flex-wrap align-items-center gap-3 mb-3">
+    <label class="d-flex align-items-center gap-2 mb-0">
+        Assembly
+        <select class="form-select form-select-sm w-auto" @bind="productId" @bind:after="LoadBomAsync">
+            @foreach (ProductOption option in products)
+            {
+                <option value="@option.ProductId">@option.Name</option>
+            }
+        </select>
+    </label>
+
+    <label class="d-flex align-items-center gap-2 mb-0">
+        Check date
+        <input type="date" class="form-control form-control-sm w-auto" @bind="checkDate" @bind:after="LoadBomAsync" />
+    </label>
+
+    @if (rows is not null)
+    {
+        <span class="text-muted small">@rows.Count components</span>
+    }
+</div>
+
+@if (error is not null)
+{
+    <div class="alert alert-danger">@error</div>
+}
+else if (rows is null)
+{
+    <p><em>Loading...</em></p>
+}
+else
+{
+    <div class="table-responsive">
+        <table class="table table-striped table-hover table-sm">
+            <thead>
+                <tr>
+                    <th class="text-end">Level</th>
+                    <th class="text-end">Component ID</th>
+                    <th>Component</th>
+                    <th class="text-end">Total qty</th>
+                    <th class="text-end">Standard cost</th>
+                    <th class="text-end">List price</th>
+                </tr>
+            </thead>
+            <tbody>
+                @if (rows.Count == 0)
+                {
+                    <tr>
+                        <td colspan="6" class="text-muted"><em>No components for this assembly on @checkDate.ToShortDateString().</em></td>
+                    </tr>
+                }
+                @foreach (BomRow row in rows)
+                {
+                    <tr>
+                        <td class="text-end">@row.BomLevel</td>
+                        <td class="text-end">@row.ComponentId</td>
+                        <td style="padding-left: @(row.BomLevel * 1.25)rem">@row.ComponentDesc</td>
+                        <td class="text-end">@row.TotalQuantity.ToString("0.##")</td>
+                        <td class="text-end">@row.StandardCost.ToString("C", usd)</td>
+                        <td class="text-end">@row.ListPrice.ToString("C", usd)</td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    </div>
+}
+
+@code {
+    /// <summary>Unmapped result type for the procedure's result set; [Column] matches the procedure's column names.</summary>
+    public sealed class BomRow
+    {
+        [Column("ProductAssemblyID")] public int ProductAssemblyId { get; set; }
+        [Column("ComponentID")] public int ComponentId { get; set; }
+        public string ComponentDesc { get; set; } = "";
+        [Precision(38, 2)] public decimal TotalQuantity { get; set; }
+        [Precision(19, 4)] public decimal StandardCost { get; set; }
+        [Precision(19, 4)] public decimal ListPrice { get; set; }
+        [Column("BOMLevel")] public short BomLevel { get; set; }
+        public int RecursionLevel { get; set; }
+    }
+
+    private sealed record ProductOption(int ProductId, string Name);
+
+    private static readonly System.Globalization.CultureInfo usd = System.Globalization.CultureInfo.GetCultureInfo("en-US");
+
+    private List<ProductOption> products = [];
+    private List<BomRow>? rows;
+    private string? error;
+    private int productId;
+
+    // BOM rows in this database are effective from 2010 onwards
+    private DateTime checkDate = new DateTime(2014, 1, 1);
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            await using AdventureWorksContext db = await DbFactory.CreateDbContextAsync();
+
+            products = await db.Products
+                .AsNoTracking()
+                .Where(p => p.FinishedGoodsFlag && p.BillOfMaterialProductAssemblies.Any())
+                .OrderBy(p => p.Name)
+                .Select(p => new ProductOption(p.ProductId, p.Name))
+                .ToListAsync();
+
+            productId = products.FirstOrDefault()?.ProductId ?? 0;
+        }
+        catch (Exception ex)
+        {
+            error = $"Could not load products: {ex.Message}";
+            return;
+        }
+
+        await LoadBomAsync();
+    }
+
+    private async Task LoadBomAsync()
+    {
+        try
+        {
+            await using AdventureWorksContext db = await DbFactory.CreateDbContextAsync();
+
+            rows = await db.Database
+                .SqlQuery<BomRow>($"EXEC dbo.uspGetBillOfMaterials @StartProductID = {productId}, @CheckDate = {checkDate}")
+                .ToListAsync();
+
+            error = null;
+        }
+        catch (Exception ex)
+        {
+            error = $"Could not load the bill of materials: {ex.Message}";
+        }
+    }
+}

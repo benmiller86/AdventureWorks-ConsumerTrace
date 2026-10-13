@@ -38,15 +38,19 @@
         color: #6c757d;
     }
 
-    .recent-queries .source-link {
-        display: inline-flex;
-        color: #6c757d;
+    .recent-queries .meta {
+        flex-wrap: wrap;
     }
 
-        .recent-queries .source-link:hover {
-            color: #212529;
-        }
-
+    .recent-queries .trace-button {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.25rem;
+        padding: 0 0.4rem;
+        font-size: 0.7rem;
+        line-height: 1.5;
+        white-space: nowrap;
+    }
     .recent-queries pre {
         margin: 0.15rem 0 0;
         padding: 0.4rem 0.6rem;
