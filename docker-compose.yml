@@ -19,10 +19,17 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    image: adventureworks-web
+      target: dev
+    image: adventureworks-web-dev
     container_name: adventureworks-web
     ports:
       - "8080:8080"
+    volumes:
+      # Live source for dotnet watch hot reload
+      - ./src:/src/src
+      # Keep the container's bin/obj separate from the host's (host obj has Windows paths)
+      - /src/src/AdventureWorks.Web/bin
+      - /src/src/AdventureWorks.Web/obj
     environment:
       - ASPNETCORE_ENVIRONMENT=Development
       # Inside the compose network the database is reached by its service name
