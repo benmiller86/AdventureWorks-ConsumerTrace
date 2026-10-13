@@ -14,13 +14,12 @@
     Calls <code>dbo.uspGetBillOfMaterials</code> with
     <code>db.Database.SqlQuery&lt;BomRow&gt;($"EXEC dbo.uspGetBillOfMaterials @@StartProductID = {productId}, @@CheckDate = {checkDate}")</code>,
     with the arguments sent as parameters. An <code>EXEC</code> can't be composed on, so the results are materialised directly
-    with <code>ToListAsync()</code> and come back in the procedure's own order. (The product list is a normal LINQ query.)
+    with <code>ToListAsync()</code> in the procedure's own (hierarchical) order, and column sorting is done in memory;
+    a third click on a column restores the procedure's order. (The product list is a normal LINQ query.)
     <br />
-    <strong>Tracing caveat:</strong> the <code>EXEC</code> batch still carries the trace comment, but it won't appear in Recent SQL:
-    <code>sys.dm_exec_query_stats</code> only records statements that have a query plan, and an <code>EXEC</code> has none.
-    The procedure's own statements are recorded against the procedure's definition instead, without the comment, so they only
-    show up with "This app only" switched off.
-
+    <strong>Tracing:</strong> an <code>EXEC</code> has no query plan of its own, so it never appears in
+    <code>sys.dm_exec_query_stats</code>. Recent SQL instead pairs the procedure's stats from
+    <code>sys.dm_exec_procedure_stats</code> with the cached <code>EXEC</code> batches that called it, which still carry the trace comment.
 </p>
 
 <div class="d-flex flex-wrap align-items-center gap-3 mb-3">
@@ -59,27 +58,27 @@ else
         <table class="table table-striped table-hover table-sm">
             <thead>
                 <tr>
-                    <th class="text-end">Level</th>
-                    <th class="text-end">Component ID</th>
-                    <th>Component</th>
-                    <th class="text-end">Total qty</th>
-                    <th class="text-end">Standard cost</th>
-                    <th class="text-end">List price</th>
+                    @foreach (Column column in Columns)
+                    {
+                        <SortableHeader Key="@column.Key" Title="@column.Title" AlignEnd="column.AlignEnd"
+                                        SortColumn="@sortColumn" SortDescending="sortDescending" OnSort="SortBy" />
+                    }
                 </tr>
             </thead>
             <tbody>
                 @if (rows.Count == 0)
                 {
                     <tr>
-                        <td colspan="6" class="text-muted"><em>No components for this assembly on @checkDate.ToShortDateString().</em></td>
+                        <td colspan="@Columns.Length" class="text-muted"><em>No components for this assembly on @checkDate.ToShortDateString().</em></td>
                     </tr>
                 }
-                @foreach (BomRow row in rows)
+                @foreach (BomRow row in Sorted(rows))
                 {
                     <tr>
                         <td class="text-end">@row.BomLevel</td>
                         <td class="text-end">@row.ComponentId</td>
-                        <td style="padding-left: @(row.BomLevel * 1.25)rem">@row.ComponentDesc</td>
+                        @* Indent by level only in the procedure's order, where it shows the hierarchy *@
+                        <td style="padding-left: @(sortColumn is null ? row.BomLevel * 1.25 : 0.25)rem">@row.ComponentDesc</td>
                         <td class="text-end">@row.TotalQuantity.ToString("0.##")</td>
                         <td class="text-end">@row.StandardCost.ToString("C", usd)</td>
                         <td class="text-end">@row.ListPrice.ToString("C", usd)</td>
@@ -105,6 +104,22 @@ else
     }
 
     private sealed record ProductOption(int ProductId, string Name);
+
+    private sealed record Column(string Key, string Title, bool AlignEnd = false);
+
+    private static readonly Column[] Columns =
+    [
+        new(nameof(BomRow.BomLevel), "Level", AlignEnd: true),
+        new(nameof(BomRow.ComponentId), "Component ID", AlignEnd: true),
+        new(nameof(BomRow.ComponentDesc), "Component"),
+        new(nameof(BomRow.TotalQuantity), "Total qty", AlignEnd: true),
+        new(nameof(BomRow.StandardCost), "Standard cost", AlignEnd: true),
+        new(nameof(BomRow.ListPrice), "List price", AlignEnd: true),
+    ];
+
+    // null = the order the procedure returned the rows in
+    private string? sortColumn;
+    private bool sortDescending;
 
     private static readonly System.Globalization.CultureInfo usd = System.Globalization.CultureInfo.GetCultureInfo("en-US");
 
@@ -156,5 +171,44 @@ else
         {
             error = $"Could not load the bill of materials: {ex.Message}";
         }
+    }
+
+    // Ascending -> descending -> back to the procedure's order. No query is needed: the rows are already in memory.
+    private void SortBy(string column)
+    {
+        if (column != sortColumn)
+        {
+            (sortColumn, sortDescending) = (column, false);
+        }
+        else if (!sortDescending)
+        {
+            sortDescending = true;
+        }
+        else
+        {
+            (sortColumn, sortDescending) = (null, false);
+        }
+    }
+
+    private IEnumerable<BomRow> Sorted(List<BomRow> source)
+    {
+        Func<BomRow, IComparable>? key = sortColumn switch
+        {
+            nameof(BomRow.BomLevel) => r => r.BomLevel,
+            nameof(BomRow.ComponentId) => r => r.ComponentId,
+            nameof(BomRow.ComponentDesc) => r => r.ComponentDesc,
+            nameof(BomRow.TotalQuantity) => r => r.TotalQuantity,
+            nameof(BomRow.StandardCost) => r => r.StandardCost,
+            nameof(BomRow.ListPrice) => r => r.ListPrice,
+            _ => null,
+        };
+
+        if (key is null)
+        {
+            return source;
+        }
+
+        IOrderedEnumerable<BomRow> sorted = sortDescending ? source.OrderByDescending(key) : source.OrderBy(key);
+        return sorted.ThenBy(r => r.ComponentId);
     }
 }

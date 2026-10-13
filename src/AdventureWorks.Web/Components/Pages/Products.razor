@@ -56,11 +56,8 @@ else
                 <tr>
                     @foreach (Column column in Columns)
                     {
-                        <th class="@(column.AlignEnd ? "text-end" : null)" aria-sort="@AriaSort(column.Key)">
-                            <button type="button" class="sort-button" @onclick="() => SortByAsync(column.Key)">
-                                @column.Title<span class="sort-indicator" aria-hidden="true">@SortIndicator(column.Key)</span>
-                            </button>
-                        </th>
+                        <SortableHeader Key="@column.Key" Title="@column.Title" AlignEnd="column.AlignEnd"
+                                        SortColumn="@sortColumn" SortDescending="sortDescending" OnSort="SortByAsync" />
                     }
                 </tr>
             </thead>
@@ -231,12 +228,6 @@ else
 
     private IOrderedQueryable<Product> Order<TKey>(IQueryable<Product> query, Expression<Func<Product, TKey>> key) =>
         sortDescending ? query.OrderByDescending(key) : query.OrderBy(key);
-
-    private string SortIndicator(string column) =>
-        column != sortColumn ? "" : sortDescending ? " ▼" : " ▲";
-
-    private string? AriaSort(string column) =>
-        column != sortColumn ? null : sortDescending ? "descending" : "ascending";
 
     public void Dispose()
     {

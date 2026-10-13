@@ -1,0 +1,25 @@
+@* Clickable column header. It only reports its Key through OnSort; the page owns the sort state and does the sorting. *@
+
+<th class="@(AlignEnd ? "text-end" : null)" aria-sort="@AriaSort" title="@Tooltip">
+    <button type="button" class="sort-button" @onclick="() => OnSort.InvokeAsync(Key)">
+        @Title<span class="sort-indicator" aria-hidden="true">@Indicator</span>
+    </button>
+</th>
+
+@code {
+    [Parameter, EditorRequired] public string Key { get; set; } = "";
+    [Parameter, EditorRequired] public string Title { get; set; } = "";
+    [Parameter] public bool AlignEnd { get; set; }
+    [Parameter] public string? Tooltip { get; set; }
+
+    /// <summary>Key of the column currently sorted by, or null when the data is in its natural order.</summary>
+    [Parameter] public string? SortColumn { get; set; }
+    [Parameter] public bool SortDescending { get; set; }
+    [Parameter] public EventCallback<string> OnSort { get; set; }
+
+    private bool IsSorted => Key == SortColumn;
+
+    private string? AriaSort => !IsSorted ? null : SortDescending ? "descending" : "ascending";
+
+    private string Indicator => !IsSorted ? "" : SortDescending ? " ▼" : " ▲";
+}

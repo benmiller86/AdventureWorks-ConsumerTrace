@@ -1,5 +1,6 @@
 @page "/sales-by-territory"
 @rendermode InteractiveServer
+@using System.Linq.Expressions
 @using AdventureWorks.Web.Models
 @using Microsoft.EntityFrameworkCore
 @inject IDbContextFactory<AdventureWorksContext> DbFactory
@@ -49,12 +50,11 @@ else
         <table class="table table-striped table-hover table-sm">
             <thead>
                 <tr>
-                    <th>Territory</th>
-                    <th>Country/Region</th>
-                    <th>Group</th>
-                    <th class="text-end">Orders</th>
-                    <th class="text-end">Total due</th>
-                    <th class="text-end">Average order</th>
+                    @foreach (Column column in Columns)
+                    {
+                        <SortableHeader Key="@column.Key" Title="@column.Title" AlignEnd="column.AlignEnd"
+                                        SortColumn="@sortColumn" SortDescending="sortDescending" OnSort="SortByAsync" />
+                    }
                 </tr>
             </thead>
             <tbody>
@@ -87,6 +87,20 @@ else
         public decimal TotalDue { get; set; }
     }
 
+    private sealed record Column(string Key, string Title, bool AlignEnd = false);
+
+    private const string AverageOrderColumn = "AverageOrder";
+
+    private static readonly Column[] Columns =
+    [
+        new(nameof(TerritorySales.Territory), "Territory"),
+        new(nameof(TerritorySales.CountryRegion), "Country/Region"),
+        new(nameof(TerritorySales.Group), "Group"),
+        new(nameof(TerritorySales.Orders), "Orders", AlignEnd: true),
+        new(nameof(TerritorySales.TotalDue), "Total due", AlignEnd: true),
+        new(AverageOrderColumn, "Average order", AlignEnd: true),
+    ];
+
     private static readonly int[] Years = [2011, 2012, 2013, 2014];
     private static readonly System.Globalization.CultureInfo usd = System.Globalization.CultureInfo.GetCultureInfo("en-US");
 
@@ -98,7 +112,17 @@ else
     // 0 = all years; kept non-nullable so the SQL parameter always has a type
     private int year;
 
+    private string sortColumn = nameof(TerritorySales.TotalDue);
+    private bool sortDescending = true;
+
     protected override Task OnInitializedAsync() => LoadAsync();
+
+    private Task SortByAsync(string column)
+    {
+        sortDescending = column == sortColumn && !sortDescending;
+        sortColumn = column;
+        return LoadAsync();
+    }
 
     private async Task LoadAsync()
     {
@@ -106,7 +130,7 @@ else
         {
             await using AdventureWorksContext db = await DbFactory.CreateDbContextAsync();
 
-            territories = await db.Database
+            IQueryable<TerritorySales> query = db.Database
                 .SqlQuery<TerritorySales>($"""
                     SELECT t.Name AS Territory,
                            t.CountryRegionCode AS CountryRegion,
@@ -117,9 +141,9 @@ else
                     JOIN Sales.SalesTerritory AS t ON t.TerritoryID = h.TerritoryID
                     WHERE {year} = 0 OR YEAR(h.OrderDate) = {year}
                     GROUP BY t.Name, t.CountryRegionCode, t.[Group]
-                    """)
-                .OrderByDescending(t => t.TotalDue)
-                .ToListAsync();
+                    """);
+
+            territories = await ApplySort(query).ToListAsync();
 
             orderCount = await db.Database
                 .SqlQuery<int>($"SELECT COUNT(*) AS [Value] FROM Sales.SalesOrderHeader WHERE {year} = 0 OR YEAR(OrderDate) = {year}")
@@ -136,4 +160,23 @@ else
             error = $"Could not load sales: {ex.Message}";
         }
     }
+
+    // EF wraps the raw SQL in a subquery and adds the ORDER BY outside it
+    private IQueryable<TerritorySales> ApplySort(IQueryable<TerritorySales> query)
+    {
+        IOrderedQueryable<TerritorySales> sorted = sortColumn switch
+        {
+            nameof(TerritorySales.Territory) => Order(query, t => t.Territory),
+            nameof(TerritorySales.CountryRegion) => Order(query, t => t.CountryRegion),
+            nameof(TerritorySales.Group) => Order(query, t => t.Group),
+            nameof(TerritorySales.Orders) => Order(query, t => t.Orders),
+            AverageOrderColumn => Order(query, t => t.TotalDue / t.Orders),
+            _ => Order(query, t => t.TotalDue),
+        };
+
+        return sorted.ThenBy(t => t.Territory);
+    }
+
+    private IOrderedQueryable<TerritorySales> Order<TKey>(IQueryable<TerritorySales> query, Expression<Func<TerritorySales, TKey>> key) =>
+        sortDescending ? query.OrderByDescending(key) : query.OrderBy(key);
 }

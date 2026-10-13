@@ -1,5 +1,6 @@
 @page "/special-offers"
 @rendermode InteractiveServer
+@using System.Linq.Expressions
 @using AdventureWorks.Web.Models
 @using Microsoft.EntityFrameworkCore
 @inject IDbContextFactory<AdventureWorksContext> DbFactory
@@ -57,15 +58,11 @@ else
         <table class="table table-striped table-hover table-sm">
             <thead>
                 <tr>
-                    <th class="text-end">ID</th>
-                    <th>Description</th>
-                    <th>Category</th>
-                    <th>Type</th>
-                    <th class="text-end">Discount</th>
-                    <th class="text-end">Qty range</th>
-                    <th>Start</th>
-                    <th>End</th>
-                    <th>Modified</th>
+                    @foreach (Column column in Columns)
+                    {
+                        <SortableHeader Key="@column.Key" Title="@column.Title" AlignEnd="column.AlignEnd"
+                                        SortColumn="@sortColumn" SortDescending="sortDescending" OnSort="SortByAsync" />
+                    }
                 </tr>
             </thead>
             <tbody>
@@ -89,7 +86,24 @@ else
 }
 
 @code {
+    private sealed record Column(string Key, string Title, bool AlignEnd = false);
+
+    private static readonly Column[] Columns =
+    [
+        new(nameof(SpecialOffer.SpecialOfferId), "ID", AlignEnd: true),
+        new(nameof(SpecialOffer.Description), "Description"),
+        new(nameof(SpecialOffer.Category), "Category"),
+        new(nameof(SpecialOffer.Type), "Type"),
+        new(nameof(SpecialOffer.DiscountPct), "Discount", AlignEnd: true),
+        new(nameof(SpecialOffer.MinQty), "Qty range", AlignEnd: true),
+        new(nameof(SpecialOffer.StartDate), "Start"),
+        new(nameof(SpecialOffer.EndDate), "End"),
+        new(nameof(SpecialOffer.ModifiedDate), "Modified"),
+    ];
+
     private List<SpecialOffer>? offers;
+    private string sortColumn = nameof(SpecialOffer.SpecialOfferId);
+    private bool sortDescending;
     private List<string> categories = [];
     private string category = "";
     private int discountDelta = 5;
@@ -118,9 +132,7 @@ else
         try
         {
             await using AdventureWorksContext db = await DbFactory.CreateDbContextAsync();
-            offers = await InCategory(db.SpecialOffers.AsNoTracking())
-                .OrderBy(o => o.SpecialOfferId)
-                .ToListAsync();
+            offers = await ApplySort(InCategory(db.SpecialOffers.AsNoTracking())).ToListAsync();
             error = null;
         }
         catch (Exception ex)
@@ -176,6 +188,34 @@ else
 
         await LoadAsync();
     }
+
+    private Task SortByAsync(string column)
+    {
+        sortDescending = column == sortColumn && !sortDescending;
+        sortColumn = column;
+        return LoadAsync();
+    }
+
+    private IQueryable<SpecialOffer> ApplySort(IQueryable<SpecialOffer> query)
+    {
+        IOrderedQueryable<SpecialOffer> sorted = sortColumn switch
+        {
+            nameof(SpecialOffer.Description) => Order(query, o => o.Description),
+            nameof(SpecialOffer.Category) => Order(query, o => o.Category),
+            nameof(SpecialOffer.Type) => Order(query, o => o.Type),
+            nameof(SpecialOffer.DiscountPct) => Order(query, o => o.DiscountPct),
+            nameof(SpecialOffer.MinQty) => Order(query, o => o.MinQty),
+            nameof(SpecialOffer.StartDate) => Order(query, o => o.StartDate),
+            nameof(SpecialOffer.EndDate) => Order(query, o => o.EndDate),
+            nameof(SpecialOffer.ModifiedDate) => Order(query, o => o.ModifiedDate),
+            _ => Order(query, o => o.SpecialOfferId),
+        };
+
+        return sorted.ThenBy(o => o.SpecialOfferId);
+    }
+
+    private IOrderedQueryable<SpecialOffer> Order<TKey>(IQueryable<SpecialOffer> query, Expression<Func<SpecialOffer, TKey>> key) =>
+        sortDescending ? query.OrderByDescending(key) : query.OrderBy(key);
 
     private IQueryable<SpecialOffer> InCategory(IQueryable<SpecialOffer> query) =>
         category.Length == 0 ? query : query.Where(o => o.Category == category);
