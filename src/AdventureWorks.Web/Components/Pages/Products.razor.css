@@ -1,3 +1,7 @@
+.product-search {
+    width: min(24rem, 100%);
+}
+
 .sort-button {
     background: none;
     border: none;

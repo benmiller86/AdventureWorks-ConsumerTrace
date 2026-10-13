@@ -23,9 +23,19 @@
 
     .recent-queries .meta {
         display: flex;
+        align-items: center;
         gap: 1rem;
         color: #6c757d;
     }
+
+    .recent-queries .source-link {
+        display: inline-flex;
+        color: #6c757d;
+    }
+
+        .recent-queries .source-link:hover {
+            color: #212529;
+        }
 
     .recent-queries pre {
         margin: 0.15rem 0 0;

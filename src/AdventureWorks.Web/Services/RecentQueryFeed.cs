@@ -1,20 +1,29 @@
+using System.Text.RegularExpressions;
 using Microsoft.Data.SqlClient;
 
 namespace AdventureWorks.Web.Services;
 
+/// <param name="SqlText">Batch text, with any ConsumerTrace permalink removed (it's surfaced as <paramref name="SourceUrl"/>).</param>
+/// <param name="SourceUrl">GitHub permalink to the calling code, if the ConsumerTrace comment included one.</param>
 public sealed record RecentQuery(
     DateTime LastExecutionTime,
     long SecondsAgoMs,
     long ExecutionCount,
     double AvgElapsedMs,
-    string SqlText);
+    string SqlText,
+    string? SourceUrl);
 
 /// <summary>
 /// Reads the most recently executed batches against the app's database from SQL Server's plan cache.
 /// Uses a plain SqlConnection rather than the DbContext so polling isn't intercepted or logged by EF.
 /// </summary>
-public sealed class RecentQueryFeed(IConfiguration configuration)
+public sealed partial class RecentQueryFeed(IConfiguration configuration)
 {
+    // Matches ", link: https://github.com/..." in the ConsumerTraceInterceptor comment. The interceptor escapes
+    // path segments, so the URL itself contains no whitespace, commas or asterisks.
+    [GeneratedRegex(@",\s*link:\s*(?<url>https://github\.com/[^\s,*]+)")]
+    private static partial Regex PermalinkPattern();
+
     // The marker comment lets the query exclude itself from its own results.
     // dm_exec_query_stats has a row per statement, so rows are grouped per batch (sql_handle)
     // to show the full batch text, including any leading comment added by an interceptor.
@@ -59,12 +68,16 @@ public sealed class RecentQueryFeed(IConfiguration configuration)
         await using SqlDataReader reader = await command.ExecuteReaderAsync(cancellationToken);
         while (await reader.ReadAsync(cancellationToken))
         {
+            string sqlText = reader.GetString(4);
+            Match permalink = PermalinkPattern().Match(sqlText);
+
             results.Add(new RecentQuery(
                 reader.GetDateTime(0),
                 reader.GetInt64(1),
                 reader.GetInt64(2),
                 (double)reader.GetDecimal(3),
-                reader.GetString(4)));
+                permalink.Success ? sqlText.Remove(permalink.Index, permalink.Length) : sqlText,
+                permalink.Success ? permalink.Groups["url"].Value : null));
         }
 
         return results;

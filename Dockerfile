@@ -21,7 +21,12 @@ ENTRYPOINT ["dotnet", "watch", "run", "--non-interactive", "--no-launch-profile"
 # Build stage
 FROM restore AS build
 COPY src/ src/
-RUN dotnet publish src/AdventureWorks.Web/AdventureWorks.Web.csproj -c Release -o /app/publish --no-restore
+# .git isn't in the build context, so pass the commit and remote in:
+#   docker build --build-arg GIT_SHA=$(git rev-parse HEAD) --build-arg REPOSITORY_URL=$(git remote get-url origin) ...
+ARG GIT_SHA=
+ARG REPOSITORY_URL=
+RUN dotnet publish src/AdventureWorks.Web/AdventureWorks.Web.csproj -c Release -o /app/publish --no-restore \
+    -p:SourceRevisionId=$GIT_SHA -p:RepositoryUrl=$REPOSITORY_URL
 
 # Runtime stage (production image: docker build --target final .)
 FROM mcr.microsoft.com/dotnet/aspnet:10.0 AS final

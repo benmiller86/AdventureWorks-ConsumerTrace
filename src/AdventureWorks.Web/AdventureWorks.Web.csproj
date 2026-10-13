@@ -8,6 +8,8 @@
     <!-- The SDK only infers this from .razor files present at restore time; the Dockerfile restores
          from the .csproj alone, so without it blazor.web.js is missing from the published image. -->
     <RequiresAspNetWebAssets>true</RequiresAspNetWebAssets>
+    <!-- Embeds the git origin URL as [AssemblyMetadata("RepositoryUrl")], used by ConsumerTraceInterceptor for permalinks -->
+    <PublishRepositoryUrl>true</PublishRepositoryUrl>
   </PropertyGroup>
 
   <ItemGroup>

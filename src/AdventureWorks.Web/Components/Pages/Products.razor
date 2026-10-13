@@ -13,14 +13,9 @@
 <p>Records from <code>Production.Product</code>.</p>
 
 <div class="d-flex flex-wrap align-items-center gap-3 mb-2">
-    <div class="input-group input-group-sm w-auto">
-        <input type="search" class="form-control" placeholder="Search name or product #" aria-label="Search products"
-               @bind="searchText" @bind:event="oninput" @bind:after="OnSearchChangedAsync" />
-        @if (!string.IsNullOrEmpty(searchText))
-        {
-            <button type="button" class="btn btn-outline-secondary" @onclick="ClearSearchAsync" aria-label="Clear search">✕</button>
-        }
-    </div>
+    @* type="search" gets the browser's built-in clear button, which raises an input event like typing does *@
+    <input type="search" class="form-control form-control-sm product-search" placeholder="Search name or product #" aria-label="Search products"
+           @bind="searchText" @bind:event="oninput" @bind:after="OnSearchChangedAsync" />
 
     <label class="d-flex align-items-center gap-2 mb-0">
         Show
@@ -169,14 +164,6 @@ else
 
         currentPage = 1;
         await LoadAsync();
-    }
-
-    private Task ClearSearchAsync()
-    {
-        searchDebounce?.Cancel();
-        searchText = "";
-        currentPage = 1;
-        return LoadAsync();
     }
 
     private Task OnPageSizeChangedAsync()

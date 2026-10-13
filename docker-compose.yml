@@ -27,6 +27,8 @@ services:
     volumes:
       # Live source for dotnet watch hot reload
       - ./src:/src/src
+      # Lets builds inside the container stamp the commit SHA (used by ConsumerTraceInterceptor)
+      - ./.git:/src/.git:ro
       # Keep the container's bin/obj separate from the host's (host obj has Windows paths)
       - /src/src/AdventureWorks.Web/bin
       - /src/src/AdventureWorks.Web/obj
